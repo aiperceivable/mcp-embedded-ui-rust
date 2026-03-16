@@ -1,0 +1,23 @@
+{
+  "feature": "protocol-completeness",
+  "status": "completed",
+  "created": "2026-03-16",
+  "source": "../mcp-embedded-ui",
+  "tasks": {
+    "task-1-withrequest-handler": {
+      "title": "Implement WithRequest handler support",
+      "status": "completed",
+      "files": ["src/server.rs", "tests/test_server.rs"]
+    },
+    "task-2-create-mount": {
+      "title": "Add create_mount() function",
+      "status": "completed",
+      "files": ["src/server.rs", "src/lib.rs", "tests/test_server.rs"]
+    },
+    "task-3-update-example": {
+      "title": "Update example to use create_mount",
+      "status": "completed",
+      "files": ["examples/axum_demo.rs"]
+    }
+  }
+}

@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<script>
+(function(){var t;try{t=localStorage.getItem('mcp-ui-theme')}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
+document.documentElement.setAttribute('data-theme',t);})();
+</script>
+<style>
+  html, html[data-theme="light"] {
+    --bg: #f5f5f5; --fg: #333; --fg-muted: #666; --fg-dim: #888; --fg-faint: #999; --fg-footer: #aaa;
+    --surface: #fff; --surface-hover: #fafafa; --surface-input: #fafafa;
+    --border: #ddd; --border-strong: #888; --border-light: #eee;
+    --hint-bg: #e8e8e8;
+    --hint-ro-bg: #d4edda; --hint-ro-fg: #155724;
+    --hint-dest-bg: #f8d7da; --hint-dest-fg: #721c24;
+    --hint-idem-bg: #cce5ff; --hint-idem-fg: #004085;
+    --code-bg: #282c34; --code-fg: #abb2bf;
+    --result-bg: #1a2332;
+    --tab-bg: #eee; --tab-border: #ddd; --tab-active-bg: #555; --tab-active-fg: #fff;
+    --curl-btn-bg: #3a3f4b; --curl-btn-fg: #999; --curl-btn-border: #555;
+    --btn-bg: #4CAF50; --btn-hover: #45a049;
+    --toggle-fg: #666;
+  }
+  html[data-theme="dark"] {
+    --bg: #1a1a2e; --fg: #e0e0e0; --fg-muted: #aaa; --fg-dim: #888; --fg-faint: #777; --fg-footer: #666;
+    --surface: #262640; --surface-hover: #2e2e4a; --surface-input: #2a2a44;
+    --border: #3a3a54; --border-strong: #666; --border-light: #333;
+    --hint-bg: #3a3a54;
+    --hint-ro-bg: #1a3a2a; --hint-ro-fg: #6fcf97;
+    --hint-dest-bg: #3a1a1a; --hint-dest-fg: #f5a0a0;
+    --hint-idem-bg: #1a2a3a; --hint-idem-fg: #7ab8f5;
+    --code-bg: #1e1e32; --code-fg: #abb2bf;
+    --result-bg: #161628;
+    --tab-bg: #2e2e4a; --tab-border: #3a3a54; --tab-active-bg: #5a5a7a; --tab-active-fg: #fff;
+    --curl-btn-bg: #2e2e4a; --curl-btn-fg: #888; --curl-btn-border: #4a4a64;
+    --btn-bg: #3d8b40; --btn-hover: #357a38;
+    --toggle-fg: #aaa;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+         background: var(--bg); color: var(--fg); padding: 24px; }
+  .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  h1 { font-size: 1.4rem; }
+  .theme-toggle { background: none; border: 1px solid var(--border); border-radius: 4px;
+                  padding: 4px 8px; cursor: pointer; font-size: 1rem; color: var(--toggle-fg);
+                  line-height: 1; }
+  .theme-toggle:hover { border-color: var(--border-strong); }
+  .tool-list { list-style: none; }
+  .tool-item { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+               margin-bottom: 8px; overflow: hidden; }
+  .tool-header { padding: 12px 16px; cursor: pointer; display: flex;
+                 align-items: flex-start; gap: 8px; }
+  .tool-header:hover { background: var(--surface-hover); }
+  .tool-toggle { color: var(--fg-faint); font-size: 0.7rem; margin-top: 3px; transition: transform 0.2s; flex-shrink: 0; }
+  .tool-item.expanded .tool-toggle { transform: rotate(90deg); }
+  .tool-item.expanded { border-color: var(--border-strong); }
+  .tool-summary { flex: 1; }
+  .tool-name { font-weight: 600; }
+  .tool-desc { color: var(--fg-muted); font-size: 0.9rem; margin-top: 4px; }
+  .hint { display: inline-block; background: var(--hint-bg); padding: 2px 8px;
+          border-radius: 3px; font-size: 0.75rem; margin-right: 4px; }
+  .hint-readonly { background: var(--hint-ro-bg); color: var(--hint-ro-fg); }
+  .hint-destructive { background: var(--hint-dest-bg); color: var(--hint-dest-fg); }
+  .hint-idempotent { background: var(--hint-idem-bg); color: var(--hint-idem-fg); }
+  .tool-detail { display: none; padding: 0 16px 16px; border-top: 1px solid var(--border-light); }
+  .tool-item.expanded .tool-detail { display: block; }
+  .detail-title { font-size: 1.1rem; margin: 12px 0; }
+  .schema-label { font-weight: 600; margin-top: 12px; display: block; }
+  pre { background: var(--code-bg); color: var(--code-fg); padding: 12px; border-radius: 4px;
+        overflow-x: auto; font-size: 0.85rem; margin-top: 4px; }
+  #loading { color: var(--fg-dim); }
+  .try-it { margin-top: 16px; border-top: 1px solid var(--border-light); padding-top: 16px; }
+  .try-it h3 { font-size: 0.95rem; margin-bottom: 8px; }
+  .input-editor { width: 100%; min-height: 120px; font-family: monospace;
+                  font-size: 0.85rem; padding: 10px; border: 1px solid var(--border);
+                  border-radius: 4px; resize: vertical; background: var(--surface-input);
+                  color: var(--fg); }
+  .execute-btn { margin-top: 8px; padding: 8px 20px; background: var(--btn-bg); color: #fff;
+                 border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem;
+                 font-weight: 600; }
+  .execute-btn:hover { background: var(--btn-hover); }
+  .execute-btn:disabled { background: #ccc; cursor: not-allowed; }
+  .result-area { margin-top: 12px; }
+  .result-area pre { background: var(--result-bg); }
+  .result-error { color: #f93e3e; }
+  .result-success { color: #49cc90; }
+  .exec-disabled { color: var(--fg-dim); font-size: 0.85rem; font-style: italic; margin-top: 16px; }
+  .auth-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px;
+              padding: 10px 14px; background: var(--surface); border: 1px solid var(--border);
+              border-radius: 6px; }
+  .auth-bar label { font-weight: 600; font-size: 0.85rem; white-space: nowrap; }
+  .auth-bar input { flex: 1; font-family: monospace; font-size: 0.82rem;
+                     padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px;
+                     background: var(--surface-input); color: var(--fg); }
+  .auth-bar .auth-status { font-size: 0.75rem; padding: 2px 8px; border-radius: 3px; }
+  .auth-bar .auth-locked { background: var(--hint-ro-bg); color: var(--hint-ro-fg); }
+  .auth-bar .auth-unlocked { background: var(--hint-dest-bg); color: var(--hint-dest-fg); }
+  .curl-section { margin-top: 14px; }
+  .curl-block { background: var(--code-bg); color: var(--code-fg); padding: 12px; padding-right: 60px;
+                border-radius: 4px; overflow-x: auto; font-size: 0.82rem;
+                white-space: pre-wrap; word-break: break-all; position: relative;
+                font-family: monospace; margin-top: 4px; }
+  .copy-btn { position: absolute; top: 8px; right: 8px; background: var(--curl-btn-bg); color: var(--curl-btn-fg);
+              border: 1px solid var(--curl-btn-border); border-radius: 3px; padding: 2px 10px;
+              font-size: 0.72rem; cursor: pointer; }
+  .copy-btn:hover { background: var(--curl-btn-border); color: #fff; }
+  .resp-header { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+  .resp-tabs { display: inline-flex; }
+  .resp-tab { padding: 3px 10px; background: var(--tab-bg); border: 1px solid var(--tab-border);
+              cursor: pointer; font-size: 0.75rem; user-select: none; }
+  .resp-tab:first-child { border-radius: 3px 0 0 3px; }
+  .resp-tab:last-child { border-radius: 0 3px 3px 0; }
+  .resp-tab.active { background: var(--tab-active-bg); color: var(--tab-active-fg); border-color: var(--tab-active-bg); }
+  .resp-pane { display: none; }
+  .resp-pane.active { display: block; }
+  .tool-search { width: 100%; padding: 8px 12px; font-size: 0.9rem; border: 1px solid var(--border);
+                 border-radius: 6px; margin-bottom: 12px; font-family: inherit;
+                 background: var(--surface-input); color: var(--fg); }
+  .tool-search:focus { outline: none; border-color: var(--border-strong); }
+</style>
+</head>
+<body>
+<div class="page-header">
+  <h1>{{TITLE}}</h1>
+  <button class="theme-toggle" id="theme-toggle" title="Toggle theme"></button>
+</div>
+<div class="auth-bar" id="auth-bar">
+  <label for="auth-token">Authorization</label>
+  <input type="text" id="auth-token" placeholder="Bearer eyJhbGci...">
+  <span class="auth-status auth-unlocked" id="auth-status">No token</span>
+</div>
+<input type="text" class="tool-search" id="tool-search" placeholder="Filter tools...">
+<div id="loading">Loading tools...</div>
+<ul class="tool-list" id="tools"></ul>
+<script>
+(function() {
+  var themeBtn = document.getElementById('theme-toggle');
+  var htmlEl = document.documentElement;
+  function detectSystemTheme() {
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  function getEffectiveTheme() {
+    var stored = null;
+    try { stored = localStorage.getItem('mcp-ui-theme'); } catch(e) {}
+    if (stored === 'light' || stored === 'dark') return stored;
+    return detectSystemTheme();
+  }
+  function applyTheme(theme) {
+    htmlEl.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19';
+    themeBtn.title = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+  }
+  applyTheme(getEffectiveTheme());
+  themeBtn.onclick = function() {
+    var next = htmlEl.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem('mcp-ui-theme', next); } catch(e) {}
+    applyTheme(next);
+  };
+})();
+</script>
+<script>
+(function() {
+  var base = window.location.pathname.replace(/\/$/, '');
+  var toolsEl = document.getElementById('tools');
+  var loadingEl = document.getElementById('loading');
+  var authInput = document.getElementById('auth-token');
+  var authStatus = document.getElementById('auth-status');
+  var executeEnabled = {{ALLOW_EXECUTE}};
+
+  function getAuthHeaders() {
+    var token = (authInput.value || '').trim();
+    if (!token) return {};
+    if (token.toLowerCase().indexOf('bearer ') !== 0) token = 'Bearer ' + token;
+    return {'Authorization': token};
+  }
+
+  function updateAuthStatus() {
+    var token = (authInput.value || '').trim();
+    if (token) {
+      authStatus.textContent = 'Token set';
+      authStatus.className = 'auth-status auth-locked';
+    } else {
+      authStatus.textContent = 'No token';
+      authStatus.className = 'auth-status auth-unlocked';
+    }
+  }
+  authInput.addEventListener('input', updateAuthStatus);
+
+  var searchInput = document.getElementById('tool-search');
+  searchInput.addEventListener('input', function() {
+    var q = this.value.toLowerCase();
+    var items = toolsEl.querySelectorAll('.tool-item');
+    for (var i = 0; i < items.length; i++) {
+      var li = items[i];
+      var name = (li.getAttribute('data-tool') || '').toLowerCase();
+      var desc = li.querySelector('.tool-desc');
+      var descText = desc ? desc.textContent.toLowerCase() : '';
+      li.style.display = (name.indexOf(q) !== -1 || descText.indexOf(q) !== -1) ? '' : 'none';
+    }
+  });
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(s));
+    return d.innerHTML;
+  }
+
+  function defaultFromSchema(schema) {
+    if (!schema || !schema.properties) return {};
+    var result = {};
+    var props = schema.properties;
+    for (var key in props) {
+      if (!props.hasOwnProperty(key)) continue;
+      var t = props[key].type;
+      if (props[key]['default'] != null) {
+        result[key] = props[key]['default'];
+      } else if (t === 'string') {
+        result[key] = '';
+      } else if (t === 'number' || t === 'integer') {
+        result[key] = 0;
+      } else if (t === 'boolean') {
+        result[key] = false;
+      } else if (t === 'array') {
+        result[key] = [];
+      } else if (t === 'object') {
+        result[key] = {};
+      } else {
+        result[key] = null;
+      }
+    }
+    return result;
+  }
+
+  function hintsHtml(annotations) {
+    if (!annotations) return '';
+    var parts = [];
+    if (annotations.readOnlyHint) parts.push('<span class="hint hint-readonly">readOnly</span>');
+    if (annotations.destructiveHint) parts.push('<span class="hint hint-destructive">destructive</span>');
+    if (annotations.idempotentHint) parts.push('<span class="hint hint-idempotent">idempotent</span>');
+    if (annotations.openWorldHint === false) parts.push('<span class="hint">closedWorld</span>');
+    return parts.join('');
+  }
+
+  fetch(base + '/tools', {headers: getAuthHeaders()})
+    .then(function(r) { return r.json(); })
+    .then(function(tools) {
+      loadingEl.style.display = 'none';
+      tools.forEach(function(t) {
+        var li = document.createElement('li');
+        li.className = 'tool-item';
+        li.setAttribute('data-tool', t.name);
+        li.innerHTML =
+          '<div class="tool-header">' +
+            '<span class="tool-toggle">&#9654;</span>' +
+            '<div class="tool-summary">' +
+              '<span class="tool-name">' + esc(t.name) + '</span> ' +
+              hintsHtml(t.annotations) +
+              '<div class="tool-desc">' + esc(t.description || '') + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="tool-detail"></div>';
+        li.querySelector('.tool-header').onclick = function() { toggleTool(li, t.name); };
+        toolsEl.appendChild(li);
+      });
+    })
+    .catch(function(e) { loadingEl.textContent = 'Error: ' + e; });
+
+  function toggleTool(li, name) {
+    if (li.classList.contains('expanded')) {
+      li.classList.remove('expanded');
+      return;
+    }
+    // Collapse any other expanded tool
+    var prev = toolsEl.querySelector('.tool-item.expanded');
+    if (prev && prev !== li) prev.classList.remove('expanded');
+    li.classList.add('expanded');
+    var detailEl = li.querySelector('.tool-detail');
+    // Load detail if not yet loaded
+    if (!detailEl.getAttribute('data-loaded')) {
+      loadDetail(li, name);
+    }
+  }
+
+  function loadDetail(li, name) {
+    var detailEl = li.querySelector('.tool-detail');
+    detailEl.innerHTML = '<p style="color:var(--fg-dim);padding-top:12px">Loading...</p>';
+    fetch(base + '/tools/' + encodeURIComponent(name), {headers: getAuthHeaders()})
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        detailEl.setAttribute('data-loaded', '1');
+        var html =
+          '<span class="schema-label">Input Schema</span>' +
+          '<pre>' + esc(JSON.stringify(d.inputSchema, null, 2)) + '</pre>';
+
+        if (d.annotations) {
+          html += '<span class="schema-label">Annotations</span>' +
+            '<pre>' + esc(JSON.stringify(d.annotations, null, 2)) + '</pre>';
+        }
+
+        html += '<div class="try-it">' +
+          '<h3>Try it</h3>' +
+          '<textarea class="input-editor">' +
+          esc(JSON.stringify(defaultFromSchema(d.inputSchema), null, 2)) +
+          '</textarea>' +
+          '<button class="execute-btn">Execute</button>' +
+          '<div class="result-area"></div>' +
+          '</div>';
+
+        detailEl.innerHTML = html;
+
+        detailEl.querySelector('.execute-btn').onclick = function() {
+          execTool(li, d.name);
+        };
+
+        if (executeEnabled === false) {
+          var tryIt = detailEl.querySelector('.try-it');
+          if (tryIt) tryIt.innerHTML =
+            '<p class="exec-disabled">' +
+            'Tool execution is disabled. ' +
+            'Launch with --allow-execute to enable.</p>';
+        }
+      })
+      .catch(function(e) {
+        detailEl.setAttribute('data-loaded', '1');
+        detailEl.innerHTML = '<p class="result-error" style="padding-top:12px">' +
+          'Failed to load tool details: ' + esc(e.message) + '</p>';
+      });
+  }
+
+  function execTool(li, name) {
+    var detailEl = li.querySelector('.tool-detail');
+    var btn = detailEl.querySelector('.execute-btn');
+    var editor = detailEl.querySelector('.input-editor');
+    var resultArea = detailEl.querySelector('.result-area');
+
+    var inputText = editor.value.trim();
+    var inputs;
+    try {
+      inputs = inputText ? JSON.parse(inputText) : {};
+    } catch (e) {
+      resultArea.innerHTML = '<p class="result-error">Invalid JSON: ' + esc(e.message) + '</p>';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Executing...';
+    resultArea.innerHTML = '';
+
+    var bodyStr = JSON.stringify(inputs);
+    var callUrl = window.location.origin + base + '/tools/' + encodeURIComponent(name) + '/call';
+    var curlBody = bodyStr.replace(/'/g, "'\\''");
+    var authToken = (authInput.value || '').trim();
+    var curlLines = ["curl -X POST '" + callUrl + "' \\"];
+    curlLines.push("  -H 'Content-Type: application/json' \\");
+    if (authToken) {
+      var bearerVal = authToken.toLowerCase().indexOf('bearer ') === 0 ? authToken : 'Bearer ' + authToken;
+      curlLines.push("  -H 'Authorization: " + bearerVal + "' \\");
+    }
+    curlLines.push("  -d '" + curlBody + "'");
+    var curlCmd = curlLines.join("\n");
+
+    var fetchHeaders = Object.assign({'Content-Type': 'application/json'}, getAuthHeaders());
+    var t0 = Date.now();
+    fetch(base + '/tools/' + encodeURIComponent(name) + '/call', {
+      method: 'POST',
+      headers: fetchHeaders,
+      body: bodyStr
+    })
+    .then(function(r) {
+      if (r.status === 403) {
+        executeEnabled = false;
+        var tryIt = detailEl.querySelector('.try-it');
+        if (tryIt) tryIt.innerHTML =
+          '<p class="exec-disabled">' +
+          'Tool execution is disabled. ' +
+          'Launch with --allow-execute to enable.</p>';
+        return null;
+      }
+      if (r.status === 401) {
+        btn.disabled = false;
+        btn.textContent = 'Execute';
+        resultArea.innerHTML =
+          '<p class="result-error">401 Unauthorized \u2014 ' +
+          'enter a valid Bearer token in the Authorization field above.</p>';
+        return null;
+      }
+      return r.json().then(function(data) { return {status: r.status, data: data}; });
+    })
+    .then(function(result) {
+      if (!result) return;
+      var elapsed = Date.now() - t0;
+      btn.disabled = false;
+      btn.textContent = 'Execute';
+      var data = result.data;
+      var html = '<span style="color:var(--fg-dim);font-size:0.8rem">Completed in ' + elapsed + 'ms</span>';
+
+      html += '<div class="curl-section">' +
+        '<span class="schema-label">cURL</span>' +
+        '<div class="curl-block"><code class="curl-cmd">' + esc(curlCmd) +
+        '</code><button class="copy-btn">Copy</button></div></div>';
+
+      if (data.isError) {
+        var errText = (data.content || []).map(function(c) { return c.text || ''; }).join('\n');
+        html += '<span class="schema-label result-error">Response &mdash; Error</span>' +
+          '<pre>' + esc(errText) + '</pre>';
+      } else {
+        var contents = data.content || [];
+        var friendlyHtml = '';
+        for (var ci = 0; ci < contents.length; ci++) {
+          var c = contents[ci];
+          if (c.type === 'image') {
+            friendlyHtml += '<img src="data:' + esc(c.mimeType || 'image/png') +
+              ';base64,' + esc(c.data) + '" style="max-width:100%;margin:4px 0;border-radius:4px">';
+          } else if (c.type === 'text') {
+            var parsed;
+            try { parsed = JSON.parse(c.text); } catch(e) { parsed = c.text; }
+            friendlyHtml += '<pre>' + esc(typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2)) + '</pre>';
+          } else {
+            friendlyHtml += '<pre>' + esc(JSON.stringify(c, null, 2)) + '</pre>';
+          }
+        }
+        var rawJson = JSON.stringify(data, null, 2);
+
+        html += '<div class="resp-header">' +
+          '<span class="schema-label result-success" style="margin:0">Response</span>' +
+          '<span class="resp-tabs">' +
+          '<span class="resp-tab active" data-tab="friendly">Result</span>' +
+          '<span class="resp-tab" data-tab="raw">Raw MCP</span>' +
+          '</span></div>' +
+          '<div class="resp-pane active" data-pane="friendly">' + friendlyHtml + '</div>' +
+          '<pre class="resp-pane" data-pane="raw">' + esc(rawJson) + '</pre>';
+      }
+
+      resultArea.innerHTML = html;
+
+      var copyBtn = resultArea.querySelector('.copy-btn');
+      if (copyBtn) {
+        copyBtn.onclick = function() {
+          var cmd = resultArea.querySelector('.curl-cmd');
+          if (cmd && navigator.clipboard) {
+            navigator.clipboard.writeText(cmd.textContent).then(function() {
+              copyBtn.textContent = 'Copied!';
+              setTimeout(function() { copyBtn.textContent = 'Copy'; }, 1500);
+            }).catch(function() {
+              copyBtn.textContent = 'Failed';
+              setTimeout(function() { copyBtn.textContent = 'Copy'; }, 1500);
+            });
+          }
+        };
+      }
+      var tabs = resultArea.querySelectorAll('.resp-tab');
+      for (var i = 0; i < tabs.length; i++) {
+        (function(tab) {
+          tab.onclick = function() {
+            var target = tab.getAttribute('data-tab');
+            var allTabs = resultArea.querySelectorAll('.resp-tab');
+            var allPanes = resultArea.querySelectorAll('.resp-pane');
+            for (var j = 0; j < allTabs.length; j++) {
+              allTabs[j].className = allTabs[j].getAttribute('data-tab') === target
+                ? 'resp-tab active' : 'resp-tab';
+            }
+            for (var j = 0; j < allPanes.length; j++) {
+              allPanes[j].className = allPanes[j].getAttribute('data-pane') === target
+                ? 'resp-pane active' : 'resp-pane';
+            }
+          };
+        })(tabs[i]);
+      }
+    })
+    .catch(function(e) {
+      btn.disabled = false;
+      btn.textContent = 'Execute';
+      resultArea.innerHTML = '<p class="result-error">Request failed: ' + esc(e.message) + '</p>';
+    });
+  }
+})();
+</script>
+<footer style="margin-top:32px;padding-top:12px;border-top:1px solid var(--border-light);text-align:center;font-size:0.75rem;color:var(--fg-footer)">
+  Powered by <a href="https://github.com/aipartnerup/mcp-embedded-ui" style="color:var(--fg-dim);text-decoration:none" target="_blank" rel="noopener">mcp-embedded-ui</a>{{PROJECT_LINK}}
+</footer>
+</body>
+</html>
