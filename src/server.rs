@@ -216,7 +216,10 @@ fn extract_headers(parts: &axum::http::request::Parts) -> HashMap<String, String
         .headers
         .iter()
         .filter_map(|(name, value)| {
-            value.to_str().ok().map(|v| (name.to_string(), v.to_string()))
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.to_string(), v.to_string()))
         })
         .collect()
 }
