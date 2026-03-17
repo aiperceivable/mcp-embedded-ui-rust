@@ -1,5 +1,6 @@
 //! Core route generation and Axum router factory for mcp-embedded-ui.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::{Path, Request, State};
@@ -10,9 +11,23 @@ use axum::Router;
 
 use crate::html::render_explorer_html;
 use crate::types::{
-    CallResult, CallResultMeta, Content, ErrorResponse, ToolCallHandler, ToolDetail, ToolSummary,
-    ToolsProvider, UiConfig,
+    CallResult, CallResultMeta, Content, ErrorResponse, Identity, ToolCallHandler, ToolDetail,
+    ToolSummary, ToolsProvider, UiConfig,
 };
+
+tokio::task_local! {
+    /// Authenticated identity for the current tool call.
+    ///
+    /// Set to `Some(identity)` when an [`Authenticator`](crate::Authenticator) is configured
+    /// and authentication succeeds. Tool call handlers can read it via:
+    ///
+    /// ```rust,ignore
+    /// use mcp_embedded_ui::AUTH_IDENTITY;
+    ///
+    /// let id = AUTH_IDENTITY.try_with(|id| id.clone()).ok().flatten();
+    /// ```
+    pub static AUTH_IDENTITY: Option<Identity>;
+}
 
 /// Shared state for all route handlers.
 struct AppState {
@@ -163,8 +178,21 @@ async fn call_tool(
     let args: serde_json::Value = serde_json::from_str(&body_str)
         .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
-    // Precondition 4: auth hook
-    if let Some(ref auth_fn) = state.config.auth_hook.0 {
+    // Precondition 4: authentication
+    // Authenticator (full identity) takes precedence over legacy auth_hook.
+    let identity: Option<Identity> = if let Some(ref authenticator) = state.config.authenticator {
+        let headers = extract_headers(&parts);
+        match authenticator.authenticate(&headers).await {
+            Some(id) => Some(id),
+            None => {
+                tracing::warn!(tool = %name, "Authenticator rejected request");
+                let resp = ErrorResponse {
+                    error: "Unauthorized".to_string(),
+                };
+                return (StatusCode::UNAUTHORIZED, Json(resp)).into_response();
+            }
+        }
+    } else if let Some(ref auth_fn) = state.config.auth_hook.0 {
         let auth_result = auth_fn(parts.clone()).await;
         if auth_result.is_err() {
             tracing::warn!(tool = %name, "Auth hook rejected request");
@@ -173,9 +201,24 @@ async fn call_tool(
             };
             return (StatusCode::UNAUTHORIZED, Json(resp)).into_response();
         }
-    }
+        None
+    } else {
+        None
+    };
 
-    do_call(&state, &name, args, parts).await
+    AUTH_IDENTITY
+        .scope(identity, do_call(&state, &name, args, parts))
+        .await
+}
+
+fn extract_headers(parts: &axum::http::request::Parts) -> HashMap<String, String> {
+    parts
+        .headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value.to_str().ok().map(|v| (name.to_string(), v.to_string()))
+        })
+        .collect()
 }
 
 async fn do_call(

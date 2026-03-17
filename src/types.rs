@@ -1,9 +1,11 @@
 //! Public types for mcp-embedded-ui.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use axum::extract::Request;
 use serde::{Deserialize, Serialize};
 
@@ -134,7 +136,14 @@ pub struct UiConfig {
     pub title: String,
     pub project_name: Option<String>,
     pub project_url: Option<String>,
+    /// Legacy validation-only auth hook. Ignored when `authenticator` is set.
     pub auth_hook: AuthHook,
+    /// Full authenticator that returns an [`Identity`] on success.
+    ///
+    /// When set, it takes precedence over `auth_hook`. The resolved identity
+    /// is propagated to tool call handlers via the
+    /// [`AUTH_IDENTITY`](crate::AUTH_IDENTITY) task-local.
+    pub authenticator: Option<Arc<dyn Authenticator>>,
 }
 
 impl Default for UiConfig {
@@ -145,6 +154,7 @@ impl Default for UiConfig {
             project_name: None,
             project_url: None,
             auth_hook: AuthHook::default(),
+            authenticator: None,
         }
     }
 }
@@ -153,6 +163,33 @@ impl Default for UiConfig {
 #[derive(Debug, thiserror::Error)]
 #[error("Unauthorized")]
 pub struct AuthError;
+
+// -- Authenticator ------------------------------------------------------------
+
+/// Authenticated identity attached to a request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Identity {
+    /// Unique identifier (user ID, service account name, etc).
+    pub id: String,
+    /// Type of identity: `"human"`, `"service"`, `"agent"`, etc.
+    pub identity_type: String,
+    /// Roles or permissions assigned to this identity.
+    pub roles: Vec<String>,
+    /// Arbitrary key-value attributes.
+    pub attrs: HashMap<String, serde_json::Value>,
+}
+
+/// Trait for authenticating incoming requests by inspecting HTTP headers.
+///
+/// Implement this trait to plug apcore (or any other) authentication into the
+/// embedded UI. The [`Identity`] returned is made available to tool call
+/// handlers via the [`AUTH_IDENTITY`](crate::AUTH_IDENTITY) task-local.
+#[async_trait]
+pub trait Authenticator: Send + Sync {
+    /// Inspect `headers` and return an [`Identity`] on success, or `None` to
+    /// reject the request with `401 Unauthorized`.
+    async fn authenticate(&self, headers: &HashMap<String, String>) -> Option<Identity>;
+}
 
 /// Error returned by tool call handlers.
 #[derive(Debug, thiserror::Error)]

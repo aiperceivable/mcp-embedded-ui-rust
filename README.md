@@ -171,11 +171,53 @@ let tools: Arc<dyn ToolsProvider> = Arc::new(provider);
 | `title` | `String` | `"MCP Tool Explorer"` | Page title (HTML-escaped automatically) |
 | `project_name` | `Option<String>` | `None` | Project name shown in footer |
 | `project_url` | `Option<String>` | `None` | Project URL linked in footer (requires `project_name`) |
-| `auth_hook` | `AuthHook` | `None` | Async auth guard function |
+| `auth_hook` | `AuthHook` | `None` | Legacy async auth guard (validation only) |
+| `authenticator` | `Option<Arc<dyn Authenticator>>` | `None` | Full auth with identity propagation (recommended) |
 
-### Auth Hook
+### Authenticator (recommended)
 
-The `auth_hook` receives the request `Parts` (headers, URI, method) and returns a future resolving to `Result<(), AuthError>`. Return `Err(AuthError)` to reject with 401. The error response is always `{"error": "Unauthorized"}` — internal details are never leaked.
+Implement the `Authenticator` trait to authenticate requests and propagate an `Identity` to tool call handlers via the `AUTH_IDENTITY` task-local:
+
+```rust
+use std::collections::HashMap;
+use std::sync::Arc;
+use async_trait::async_trait;
+use mcp_embedded_ui::{Authenticator, Identity, AUTH_IDENTITY, UiConfig};
+
+struct MyAuth;
+
+#[async_trait]
+impl Authenticator for MyAuth {
+    async fn authenticate(&self, headers: &HashMap<String, String>) -> Option<Identity> {
+        let token = headers.get("authorization")?.strip_prefix("Bearer ")?;
+        // Validate token, return Identity on success
+        Some(Identity {
+            id: "user-123".into(),
+            identity_type: "human".into(),
+            roles: vec!["user".into()],
+            attrs: Default::default(),
+        })
+    }
+}
+
+let config = UiConfig {
+    allow_execute: true,
+    authenticator: Some(Arc::new(MyAuth)),
+    ..UiConfig::default()
+};
+```
+
+Inside tool call handlers, read the authenticated identity:
+
+```rust
+let identity = AUTH_IDENTITY.try_with(|id| id.clone()).ok().flatten();
+```
+
+When `authenticator` is set, it takes precedence over `auth_hook`. Returning `None` from `authenticate()` responds with 401.
+
+### Auth Hook (legacy)
+
+The `auth_hook` receives the request `Parts` (headers, URI, method) and returns a future resolving to `Result<(), AuthError>`. Return `Err(AuthError)` to reject with 401. Unlike `Authenticator`, it does not propagate identity to handlers. The error response is always `{"error": "Unauthorized"}` — internal details are never leaked.
 
 Auth only guards `POST /tools/{name}/call`. Discovery endpoints (`GET /tools`, `GET /tools/{name}`) are always public.
 

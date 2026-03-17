@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-03-17
+
+### Added
+
+- **`Authenticator` trait** — full-featured authentication that returns an `Identity` on success, replacing the validation-only `AuthHook` pattern. When set on `UiConfig`, it takes precedence over the legacy `auth_hook`.
+- **`Identity` struct** — represents an authenticated user or service with `id`, `identity_type`, `roles`, and `attrs` (arbitrary `HashMap<String, serde_json::Value>` attributes).
+- **`AUTH_IDENTITY` task-local** — propagates the authenticated `Identity` to tool call handlers during execution. Handlers read it via `AUTH_IDENTITY.try_with(|id| id.clone())`.
+- **`ToolCallFn` / `ToolCallWithRequestFn` re-exports** — previously defined but not exported from `lib.rs`.
+
+### Changed
+
+- **`UiConfig` gains `authenticator` field** — `Option<Arc<dyn Authenticator>>`, defaults to `None`. Fully backward compatible.
+- **Auth precedence** — when both `authenticator` and `auth_hook` are set, `authenticator` wins. Legacy `auth_hook` is only evaluated as a fallback.
+
 ## [0.3.0] - 2026-03-11
 
 ### Added
