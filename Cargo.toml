@@ -5,10 +5,10 @@ edition = "2021"
 description = "A lightweight embedded Web UI for any MCP Server"
 license = "Apache-2.0"
 readme = "README.md"
-authors = ["aipartnerup <tercel.yi@gmail.com>"]
-homepage = "https://aipartnerup.com"
-repository = "https://github.com/aipartnerup/mcp-embedded-ui-rust"
-documentation = "https://github.com/aipartnerup/mcp-embedded-ui"
+authors = ["aiperceivable <tercel.yi@gmail.com>"]
+homepage = "https://aiperceivable.github.io/mcp-embedded-ui/"
+repository = "https://github.com/aiperceivable/mcp-embedded-ui-rust"
+documentation = "https://github.com/aiperceivable/mcp-embedded-ui"
 keywords = ["mcp", "ui", "explorer", "tools"]
 categories = [
     "web-programming",
