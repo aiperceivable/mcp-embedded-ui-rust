@@ -382,6 +382,253 @@ async fn test_call_tool_invalid_json_treated_as_empty() {
 }
 
 // ---------------------------------------------------------------------------
+// Validate tool — F7
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+struct SchemaTool {
+    n: String,
+    schema: serde_json::Value,
+}
+
+impl Tool for SchemaTool {
+    fn name(&self) -> &str {
+        &self.n
+    }
+    fn description(&self) -> &str {
+        ""
+    }
+    fn input_schema(&self) -> serde_json::Value {
+        self.schema.clone()
+    }
+}
+
+fn validate_tools() -> Vec<Arc<dyn Tool>> {
+    vec![
+        Arc::new(SchemaTool {
+            n: "echo".to_string(),
+            schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string"},
+                    "count": {"type": "integer"}
+                },
+                "required": ["city"]
+            }),
+        }),
+        Arc::new(SchemaTool {
+            n: "noschema".to_string(),
+            schema: serde_json::json!({}),
+        }),
+    ]
+}
+
+fn build_validate_router(config: UiConfig) -> axum::Router {
+    let tools: Arc<dyn ToolsProvider> = Arc::new(validate_tools());
+    mcp_embedded_ui::build_ui_routes(tools, fake_handler(), config)
+}
+
+#[tokio::test]
+async fn test_validate_valid_input() {
+    let router = build_validate_router(default_config());
+    let (status, body) = send_post(
+        &router,
+        "/tools/echo/validate",
+        r#"{"city": "Paris"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["valid"], serde_json::Value::Bool(true));
+    assert!(
+        v.get("errors").is_none(),
+        "errors key must be omitted on success, got: {body}"
+    );
+}
+
+#[tokio::test]
+async fn test_validate_missing_required_field() {
+    let router = build_validate_router(default_config());
+    let (status, body) = send_post(&router, "/tools/echo/validate", "{}").await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["valid"], serde_json::Value::Bool(false));
+    let errors = v["errors"].as_array().unwrap();
+    assert!(errors.iter().any(|e| e["keyword"] == "required"));
+}
+
+#[tokio::test]
+async fn test_validate_wrong_type_with_path() {
+    let router = build_validate_router(default_config());
+    let (status, body) = send_post(
+        &router,
+        "/tools/echo/validate",
+        r#"{"city": "Paris", "count": "not-int"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["valid"], serde_json::Value::Bool(false));
+    let errors = v["errors"].as_array().unwrap();
+    let type_err = errors
+        .iter()
+        .find(|e| e["keyword"] == "type")
+        .expect("expected at least one type error");
+    assert_eq!(type_err["path"], "/count");
+}
+
+#[tokio::test]
+async fn test_validate_multiple_errors() {
+    let multi: Vec<Arc<dyn Tool>> = vec![Arc::new(SchemaTool {
+        n: "multi".to_string(),
+        schema: serde_json::json!({
+            "type": "object",
+            "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+            "required": ["a", "b"]
+        }),
+    })];
+    let tools: Arc<dyn ToolsProvider> = Arc::new(multi);
+    let router = mcp_embedded_ui::build_ui_routes(tools, fake_handler(), default_config());
+    let (status, body) = send_post(&router, "/tools/multi/validate", "{}").await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(v["errors"].as_array().unwrap().len() >= 2);
+}
+
+#[tokio::test]
+async fn test_validate_tool_not_found() {
+    let router = build_validate_router(default_config());
+    let (status, body) = send_post(&router, "/tools/nope/validate", "{}").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(v["error"].as_str().unwrap().contains("Tool not found"));
+}
+
+#[tokio::test]
+async fn test_validate_invalid_json_returns_400() {
+    let router = build_validate_router(default_config());
+    let (status, body) = send_post_raw(&router, "/tools/echo/validate", b"not json").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["valid"], serde_json::Value::Bool(false));
+    assert_eq!(v["errors"][0]["keyword"], "format");
+    assert_eq!(v["errors"][0]["path"], "");
+}
+
+#[tokio::test]
+async fn test_validate_no_schema_always_valid() {
+    let router = build_validate_router(default_config());
+    let (status, body) = send_post(
+        &router,
+        "/tools/noschema/validate",
+        r#"{"anything": 123}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["valid"], serde_json::Value::Bool(true));
+}
+
+#[tokio::test]
+async fn test_validate_ignores_allow_execute_false() {
+    let router = build_validate_router(default_config()); // allow_execute=false default
+    let (status, body) = send_post(
+        &router,
+        "/tools/echo/validate",
+        r#"{"city": "Paris"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["valid"], serde_json::Value::Bool(true));
+}
+
+#[tokio::test]
+async fn test_validate_does_not_invoke_auth_hook() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let counter = Arc::new(AtomicUsize::new(0));
+    let counter_inner = counter.clone();
+    let auth_hook_fn: mcp_embedded_ui::AuthHookFn = Arc::new(move |_parts| {
+        let c = counter_inner.clone();
+        Box::pin(async move {
+            c.fetch_add(1, Ordering::SeqCst);
+            Err::<(), AuthError>(AuthError)
+        })
+            as Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>
+    });
+    let config = UiConfig {
+        allow_execute: true,
+        auth_hook: AuthHook(Some(auth_hook_fn)),
+        ..default_config()
+    };
+    let router = build_validate_router(config);
+    let (status, _) = send_post(
+        &router,
+        "/tools/echo/validate",
+        r#"{"city": "Paris"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        0,
+        "auth_hook must not be invoked for /validate"
+    );
+}
+
+#[tokio::test]
+async fn test_validate_does_not_invoke_handler() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let counter = Arc::new(AtomicUsize::new(0));
+    let counter_inner = counter.clone();
+
+    let handler = ToolCallHandler::Basic(Arc::new(
+        move |_name: String, _args: serde_json::Value| {
+            let c = counter_inner.clone();
+            Box::pin(async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                Ok((Vec::<Content>::new(), false, None))
+            }) as Pin<Box<dyn Future<Output = HandlerResult> + Send>>
+        },
+    ));
+
+    let tools: Arc<dyn ToolsProvider> = Arc::new(validate_tools());
+    let config = UiConfig {
+        allow_execute: true,
+        ..default_config()
+    };
+    let router = mcp_embedded_ui::build_ui_routes(tools, handler, config);
+    let _ = send_post(
+        &router,
+        "/tools/echo/validate",
+        r#"{"city": "Paris"}"#,
+    )
+    .await;
+    let _ = send_post(&router, "/tools/echo/validate", "{}").await;
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        0,
+        "handle_call must never be invoked from /validate"
+    );
+}
+
+#[tokio::test]
+async fn test_validate_omits_errors_when_valid() {
+    let router = build_validate_router(default_config());
+    let (_, body) = send_post(
+        &router,
+        "/tools/echo/validate",
+        r#"{"city": "Paris"}"#,
+    )
+    .await;
+    // Raw body must not contain the "errors" key at all.
+    assert!(
+        !body.contains("\"errors\""),
+        "body should not contain `errors` key when valid, got: {body}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // allow_execute=false
 // ---------------------------------------------------------------------------
 

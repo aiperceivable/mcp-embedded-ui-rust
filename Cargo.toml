@@ -1,6 +1,6 @@
 [package]
 name = "mcp-embedded-ui"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2021"
 description = "A lightweight embedded Web UI for any MCP Server"
 license = "Apache-2.0"
@@ -30,6 +30,7 @@ async-trait = "0.1"
 tracing = "0.1"
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"
+jsonschema = { version = "0.46.2", default-features = false }
 
 [dev-dependencies]
 tokio-test = "0.4"

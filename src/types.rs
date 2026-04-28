@@ -204,6 +204,29 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
+/// A single normalized JSON Schema validation failure.
+///
+/// Wire format used by `POST /tools/{name}/validate`. `path` is a JSON Pointer
+/// (RFC 6901) — empty string for the root.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationFailure {
+    pub path: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keyword: Option<String>,
+}
+
+/// Response envelope for `POST /tools/{name}/validate`.
+///
+/// `errors` is omitted from the JSON output entirely when validation passes,
+/// per the F7 spec.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidateResult {
+    pub valid: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub errors: Vec<ValidationFailure>,
+}
+
 /// Dynamic tools provider backed by an async function.
 pub struct DynamicToolsProvider<F>
 where

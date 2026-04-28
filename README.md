@@ -35,7 +35,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-mcp-embedded-ui = "0.3"
+mcp-embedded-ui = "0.4"
 ```
 
 Requires [Axum](https://github.com/tokio-rs/axum) 0.8+ and [Tokio](https://tokio.rs/) 1.x.

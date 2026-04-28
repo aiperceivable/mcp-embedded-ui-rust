@@ -12,7 +12,7 @@ use axum::Router;
 use crate::html::render_explorer_html;
 use crate::types::{
     CallResult, CallResultMeta, Content, ErrorResponse, Identity, ToolCallHandler, ToolDetail,
-    ToolSummary, ToolsProvider, UiConfig,
+    ToolSummary, ToolsProvider, UiConfig, ValidateResult, ValidationFailure,
 };
 
 tokio::task_local! {
@@ -64,6 +64,7 @@ pub fn build_ui_routes(
         .route("/", get(explorer_page))
         .route("/tools", get(list_tools))
         .route("/tools/{name}", get(tool_detail))
+        .route("/tools/{name}/validate", axum::routing::post(validate_tool))
         .route("/tools/{name}/call", axum::routing::post(call_tool))
         .with_state(state)
 }
@@ -142,6 +143,81 @@ async fn tool_detail(State(state): State<Arc<AppState>>, Path(name): Path<String
             (StatusCode::NOT_FOUND, Json(body)).into_response()
         }
     }
+}
+
+fn validate_args(schema: &serde_json::Value, data: &serde_json::Value) -> Vec<ValidationFailure> {
+    let is_empty_object = schema
+        .as_object()
+        .map(|o| o.is_empty())
+        .unwrap_or(false);
+    if schema.is_null() || is_empty_object {
+        return Vec::new();
+    }
+    let validator = match jsonschema::validator_for(schema) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    validator
+        .iter_errors(data)
+        .map(|err| ValidationFailure {
+            path: err.instance_path().as_str().to_string(),
+            message: err.to_string(),
+            keyword: Some(err.kind().keyword().to_string()),
+        })
+        .collect()
+}
+
+async fn validate_tool(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    req: Request,
+) -> Response {
+    let (_parts, body) = req.into_parts();
+
+    let tools = state.tools.tools().await;
+    let tool = tools.iter().find(|t| t.name() == name);
+    let Some(tool) = tool else {
+        let resp = ErrorResponse {
+            error: format!("Tool not found: {}", name),
+        };
+        return (StatusCode::NOT_FOUND, Json(resp)).into_response();
+    };
+
+    let body_bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(b) => b,
+        Err(_) => axum::body::Bytes::new(),
+    };
+
+    let body_str = String::from_utf8_lossy(&body_bytes);
+    let data: serde_json::Value = match serde_json::from_str(&body_str) {
+        Ok(v) => v,
+        Err(e) => {
+            let result = ValidateResult {
+                valid: false,
+                errors: vec![ValidationFailure {
+                    path: String::new(),
+                    message: format!("Invalid JSON: {}", e),
+                    keyword: Some("format".to_string()),
+                }],
+            };
+            return (StatusCode::BAD_REQUEST, Json(result)).into_response();
+        }
+    };
+
+    let schema = tool.input_schema();
+    let errors = validate_args(&schema, &data);
+    let result = if errors.is_empty() {
+        ValidateResult {
+            valid: true,
+            errors: Vec::new(),
+        }
+    } else {
+        ValidateResult {
+            valid: false,
+            errors,
+        }
+    };
+    Json(result).into_response()
 }
 
 async fn call_tool(

@@ -13,5 +13,5 @@ pub use types::{
     AuthError, AuthHook, AuthHookFn, AuthResult, Authenticator, CallResult, CallResultMeta,
     Content, DynamicToolsProvider, ErrorResponse, HandlerResult, Identity, Tool, ToolCallError,
     ToolCallFn, ToolCallHandler, ToolCallWithRequestFn, ToolDetail, ToolSummary, ToolsFuture,
-    ToolsProvider, UiConfig,
+    ToolsProvider, UiConfig, ValidateResult, ValidationFailure,
 };
