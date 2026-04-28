@@ -146,10 +146,7 @@ async fn tool_detail(State(state): State<Arc<AppState>>, Path(name): Path<String
 }
 
 fn validate_args(schema: &serde_json::Value, data: &serde_json::Value) -> Vec<ValidationFailure> {
-    let is_empty_object = schema
-        .as_object()
-        .map(|o| o.is_empty())
-        .unwrap_or(false);
+    let is_empty_object = schema.as_object().map(|o| o.is_empty()).unwrap_or(false);
     if schema.is_null() || is_empty_object {
         return Vec::new();
     }

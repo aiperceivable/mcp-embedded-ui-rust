@@ -431,12 +431,7 @@ fn build_validate_router(config: UiConfig) -> axum::Router {
 #[tokio::test]
 async fn test_validate_valid_input() {
     let router = build_validate_router(default_config());
-    let (status, body) = send_post(
-        &router,
-        "/tools/echo/validate",
-        r#"{"city": "Paris"}"#,
-    )
-    .await;
+    let (status, body) = send_post(&router, "/tools/echo/validate", r#"{"city": "Paris"}"#).await;
     assert_eq!(status, StatusCode::OK);
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["valid"], serde_json::Value::Bool(true));
@@ -518,12 +513,8 @@ async fn test_validate_invalid_json_returns_400() {
 #[tokio::test]
 async fn test_validate_no_schema_always_valid() {
     let router = build_validate_router(default_config());
-    let (status, body) = send_post(
-        &router,
-        "/tools/noschema/validate",
-        r#"{"anything": 123}"#,
-    )
-    .await;
+    let (status, body) =
+        send_post(&router, "/tools/noschema/validate", r#"{"anything": 123}"#).await;
     assert_eq!(status, StatusCode::OK);
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["valid"], serde_json::Value::Bool(true));
@@ -532,12 +523,7 @@ async fn test_validate_no_schema_always_valid() {
 #[tokio::test]
 async fn test_validate_ignores_allow_execute_false() {
     let router = build_validate_router(default_config()); // allow_execute=false default
-    let (status, body) = send_post(
-        &router,
-        "/tools/echo/validate",
-        r#"{"city": "Paris"}"#,
-    )
-    .await;
+    let (status, body) = send_post(&router, "/tools/echo/validate", r#"{"city": "Paris"}"#).await;
     assert_eq!(status, StatusCode::OK);
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(v["valid"], serde_json::Value::Bool(true));
@@ -553,8 +539,7 @@ async fn test_validate_does_not_invoke_auth_hook() {
         Box::pin(async move {
             c.fetch_add(1, Ordering::SeqCst);
             Err::<(), AuthError>(AuthError)
-        })
-            as Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>
+        }) as Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>
     });
     let config = UiConfig {
         allow_execute: true,
@@ -562,12 +547,7 @@ async fn test_validate_does_not_invoke_auth_hook() {
         ..default_config()
     };
     let router = build_validate_router(config);
-    let (status, _) = send_post(
-        &router,
-        "/tools/echo/validate",
-        r#"{"city": "Paris"}"#,
-    )
-    .await;
+    let (status, _) = send_post(&router, "/tools/echo/validate", r#"{"city": "Paris"}"#).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         counter.load(Ordering::SeqCst),
@@ -582,15 +562,14 @@ async fn test_validate_does_not_invoke_handler() {
     let counter = Arc::new(AtomicUsize::new(0));
     let counter_inner = counter.clone();
 
-    let handler = ToolCallHandler::Basic(Arc::new(
-        move |_name: String, _args: serde_json::Value| {
+    let handler =
+        ToolCallHandler::Basic(Arc::new(move |_name: String, _args: serde_json::Value| {
             let c = counter_inner.clone();
             Box::pin(async move {
                 c.fetch_add(1, Ordering::SeqCst);
                 Ok((Vec::<Content>::new(), false, None))
             }) as Pin<Box<dyn Future<Output = HandlerResult> + Send>>
-        },
-    ));
+        }));
 
     let tools: Arc<dyn ToolsProvider> = Arc::new(validate_tools());
     let config = UiConfig {
@@ -598,12 +577,7 @@ async fn test_validate_does_not_invoke_handler() {
         ..default_config()
     };
     let router = mcp_embedded_ui::build_ui_routes(tools, handler, config);
-    let _ = send_post(
-        &router,
-        "/tools/echo/validate",
-        r#"{"city": "Paris"}"#,
-    )
-    .await;
+    let _ = send_post(&router, "/tools/echo/validate", r#"{"city": "Paris"}"#).await;
     let _ = send_post(&router, "/tools/echo/validate", "{}").await;
     assert_eq!(
         counter.load(Ordering::SeqCst),
@@ -615,12 +589,7 @@ async fn test_validate_does_not_invoke_handler() {
 #[tokio::test]
 async fn test_validate_omits_errors_when_valid() {
     let router = build_validate_router(default_config());
-    let (_, body) = send_post(
-        &router,
-        "/tools/echo/validate",
-        r#"{"city": "Paris"}"#,
-    )
-    .await;
+    let (_, body) = send_post(&router, "/tools/echo/validate", r#"{"city": "Paris"}"#).await;
     // Raw body must not contain the "errors" key at all.
     assert!(
         !body.contains("\"errors\""),
