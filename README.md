@@ -238,6 +238,9 @@ cargo run --example axum_demo
 # Visit http://localhost:8000/explorer/
 # Paste "Bearer demo-secret-token" in the UI's token field to execute tools
 
+# Format check
+cargo fmt --all -- --check
+
 # Run tests
 cargo test --all-features
 
