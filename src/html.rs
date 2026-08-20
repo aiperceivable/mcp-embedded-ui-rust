@@ -11,10 +11,34 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
+const ALLOWED_URL_SCHEMES: [&str; 3] = ["http://", "https://", "mailto:"];
+
+/// Whether `url` may be placed in an `href`.
+///
+/// HTML escaping alone does not neutralise `javascript:` — that string
+/// contains no character an escaper would touch. Browsers also ignore
+/// TAB/LF/CR and surrounding whitespace while resolving a scheme, so
+/// `java\tscript:alert(1)` resolves to `javascript:alert(1)`; strip those
+/// before testing rather than after. See PROTOCOL.md security checklist.
+fn is_safe_url(url: &str) -> bool {
+    let stripped: String = url
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    let cleaned = stripped.trim();
+    if cleaned.starts_with('/') {
+        return true;
+    }
+    let lowered = cleaned.to_ascii_lowercase();
+    ALLOWED_URL_SCHEMES
+        .iter()
+        .any(|scheme| lowered.starts_with(scheme))
+}
+
 fn build_project_link(project_name: Option<&str>, project_url: Option<&str>) -> String {
     match (project_name, project_url) {
         (None, None) => String::new(),
-        (Some(name), Some(url)) => {
+        (Some(name), Some(url)) if is_safe_url(url) => {
             let escaped_name = html_escape(name);
             let escaped_url = html_escape(url);
             format!(
@@ -23,7 +47,9 @@ fn build_project_link(project_name: Option<&str>, project_url: Option<&str>) -> 
                 escaped_url, escaped_name,
             )
         }
-        (Some(name), None) => {
+        // Either no URL at all, or one whose scheme is not allow-listed:
+        // keep the project name, drop the link (PROTOCOL.md).
+        (Some(name), _) => {
             let escaped_name = html_escape(name);
             format!(" &middot; {}", escaped_name)
         }
@@ -58,6 +84,55 @@ mod tests {
         assert_eq!(html_escape("<script>"), "&lt;script&gt;");
         assert_eq!(html_escape("a & b"), "a &amp; b");
         assert_eq!(html_escape("\"quoted\""), "&quot;quoted&quot;");
+    }
+
+    const ACCEPTED_URLS: [&str; 5] = [
+        "https://example.com/x",
+        "http://example.com/x",
+        "HTTPS://example.com/x",
+        "mailto:someone@example.com",
+        "/docs/index.html",
+    ];
+
+    const REJECTED_URLS: [&str; 8] = [
+        "javascript:alert(1)",
+        "JaVaScRiPt:alert(1)",
+        "data:text/html,<script>alert(1)</script>",
+        "vbscript:msgbox(1)",
+        "  javascript:alert(1)",
+        "java\tscript:alert(1)",
+        "java\nscript:alert(1)",
+        "java\rscript:alert(1)",
+    ];
+
+    #[test]
+    fn test_accepted_schemes_render_an_anchor() {
+        for url in ACCEPTED_URLS {
+            let link = build_project_link(Some("proj"), Some(url));
+            assert!(
+                link.contains("<a href="),
+                "{url:?} should render an anchor, got: {link}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rejected_schemes_degrade_to_plain_text() {
+        for url in REJECTED_URLS {
+            let link = build_project_link(Some("proj"), Some(url));
+            assert!(
+                !link.contains("<a href="),
+                "{url:?} must not become an anchor, got: {link}"
+            );
+            assert!(
+                link.contains("proj"),
+                "{url:?} must still show the project name, got: {link}"
+            );
+            assert!(
+                !link.to_ascii_lowercase().contains("javascript"),
+                "{url:?} leaked into the page, got: {link}"
+            );
+        }
     }
 
     #[test]

@@ -2,6 +2,73 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-08-20
+
+### Changed
+
+- **BREAKING (spec F6/FR-1): the Try-It editor prefill no longer fabricates values.**
+  Synced `explorer.html` from the spec repo at 0.5.0. The prefill now emits exactly
+  the keys listed in `inputSchema.required`, using each property's declared
+  `default` when it has one and `null` otherwise. Optional properties are omitted
+  entirely, generation does not recurse into nested objects, and a schema with no
+  `required` prefills `{}`.
+
+  The previous rule invented a type-based value for *every* property
+  (`"string"` → `""`, `"number"` → `0`, …), which had two consequences. First,
+  size: a 257-property schema produced a 259-line prefill inside a 120px editor.
+  Second, and more seriously, it emitted a key for every property and drew every
+  value from the declared type, so it satisfied `required` and the type
+  constraints unconditionally — making the 0.4.0 Validate button incapable of
+  failing on a fresh prefill for any schema. `null` supplies the key without
+  asserting a value and is rejected wherever the schema does not admit it.
+
+### Documentation
+
+- **Recorded why `Authenticator` exists alongside `AuthHook`** on the trait
+  itself: `AuthHook` receives no continuation and returns no value, so identity
+  propagation through it is structurally impossible in Rust, whereas Python's
+  context manager and TypeScript's `(req, next)` both carry the call. The trait
+  is a parity mechanism so that Rust callers get the same API as the other two
+  bindings — not extra capability. Also corrected `UiConfig.auth_hook`'s bare
+  "Legacy" label, which read as deprecation: it is still the right choice for a
+  pure pass/fail gate.
+
+### Fixed
+
+- **`project_url` is now scheme-checked before being placed in `href`.** Only
+  `http://`, `https://`, `mailto:` and a leading `/` are accepted; anything else
+  renders the project name as plain text. TAB/LF/CR are stripped and the value
+  trimmed before the check, because browsers ignore those while resolving a
+  scheme. Not an exploitable vulnerability — `project_url` is deployment
+  configuration, not caller input — but HTML escaping alone never stopped
+  `javascript:`.
+
+- **`/validate` no longer mishandles a tool whose `inputSchema` cannot be
+  compiled.** Such a schema is now reported as a single `keyword: "schema"`
+  validation failure at HTTP 200, per the new F7 contract.
+  Previously the `Err` arm returned an empty error list, reporting the input
+  **valid** without having validated anything.
+- An explicit `default: null` in a schema is now honoured. The previous guard
+  (`props[key]['default'] != null`) discarded it and fell through to a fabricated
+  type default.
+
+### Tests
+
+- **Covered the `Authenticator` path, which had no tests in this crate.** Six
+  cases: identity actually reaches the handler (asserted on the observed
+  identity, not just a 200), rejection returns 401, the authenticator takes
+  precedence and the `AuthHook` provably does not run, the identity slot reads
+  as empty rather than panicking when no authenticator is set, and neither the
+  GET endpoints nor `/validate` are guarded. Maps to the new F4 TC-7..TC-11.
+  Adds `async-trait` as a dev-dependency.
+
+- Added a `/validate` case for a tool whose `inputSchema` cannot be compiled —
+  asserts the input is reported invalid rather than silently valid.
+
+- Added template guards for FR-1: the prefill must read `inputSchema.required`
+  and must not fabricate type-based values. These run even when the spec repo is
+  not checked out alongside, unlike the existing drift check.
+
 ## [0.4.0] - 2026-04-28
 
 ### Added

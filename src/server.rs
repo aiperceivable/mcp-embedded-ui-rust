@@ -150,9 +150,18 @@ fn validate_args(schema: &serde_json::Value, data: &serde_json::Value) -> Vec<Va
     if schema.is_null() || is_empty_object {
         return Vec::new();
     }
+    // The schema itself is not compilable. Report it as a validation failure
+    // (F7) rather than returning an empty error list, which would report the
+    // input valid without having validated anything.
     let validator = match jsonschema::validator_for(schema) {
         Ok(v) => v,
-        Err(_) => return Vec::new(),
+        Err(err) => {
+            return vec![ValidationFailure {
+                path: String::new(),
+                message: format!("Invalid schema: {err}"),
+                keyword: Some("schema".to_string()),
+            }]
+        }
     };
     validator
         .iter_errors(data)

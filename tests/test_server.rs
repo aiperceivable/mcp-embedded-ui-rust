@@ -2,6 +2,7 @@
 //!
 //! Ported from the Python reference implementation test suite.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -12,8 +13,8 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 use mcp_embedded_ui::{
-    AuthError, AuthHook, Content, DynamicToolsProvider, HandlerResult, Tool, ToolCallError,
-    ToolCallHandler, ToolsProvider, UiConfig,
+    AuthError, AuthHook, Authenticator, Content, DynamicToolsProvider, HandlerResult, Identity,
+    Tool, ToolCallError, ToolCallHandler, ToolsProvider, UiConfig, AUTH_IDENTITY,
 };
 
 // ---------------------------------------------------------------------------
@@ -420,12 +421,45 @@ fn validate_tools() -> Vec<Arc<dyn Tool>> {
             n: "noschema".to_string(),
             schema: serde_json::json!({}),
         }),
+        // A schema that is itself structurally invalid — no validator can be
+        // built from it (F7).
+        Arc::new(SchemaTool {
+            n: "badschema".to_string(),
+            schema: serde_json::json!({"type": "no-such-type"}),
+        }),
     ]
 }
 
 fn build_validate_router(config: UiConfig) -> axum::Router {
     let tools: Arc<dyn ToolsProvider> = Arc::new(validate_tools());
     mcp_embedded_ui::build_ui_routes(tools, fake_handler(), config)
+}
+
+#[tokio::test]
+async fn test_validate_uncompilable_schema_is_a_failure() {
+    // A schema that cannot be compiled must be reported as a validation
+    // failure — never silently as valid, which would repeat the FR-1 defect
+    // of a Validate button that cannot fail.
+    let router = build_validate_router(default_config());
+    let (status, body) = send_post(&router, "/tools/badschema/validate", r#"{"anything": 1}"#).await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        v["valid"],
+        serde_json::Value::Bool(false),
+        "an uncompilable schema must not report valid, got: {body}"
+    );
+    let errors = v["errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0]["path"], "");
+    assert_eq!(errors[0]["keyword"], "schema");
+    assert!(
+        errors[0]["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Invalid schema:"),
+        "got: {body}"
+    );
 }
 
 #[tokio::test]
@@ -996,4 +1030,264 @@ fn test_template_matches_spec_repo() {
         "explorer.html has drifted from spec repo. \
          Run: cp ../mcp-embedded-ui/docs/explorer.html src/explorer.html"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Prefill generation — F6/FR-1
+//
+// defaultFromSchema is JavaScript inside explorer.html. Its behaviour is
+// exercised in the TypeScript SDK, which ships the byte-identical template.
+// These assertions guard the same invariant here, and unlike the drift check
+// above they still run when the spec repo is not checked out alongside.
+// ---------------------------------------------------------------------------
+
+fn explorer_template() -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/explorer.html");
+    std::fs::read_to_string(path).expect("failed to read explorer.html")
+}
+
+#[test]
+fn test_prefill_reads_required() {
+    assert!(
+        explorer_template().contains("var required = schema.required;"),
+        "explorer.html prefill no longer reads inputSchema.required (F6/FR-1)"
+    );
+}
+
+#[test]
+fn test_prefill_does_not_fabricate_type_defaults() {
+    // A fabricated placeholder would satisfy required and the declared type,
+    // making the FR-8 Validate button unable to fail on a fresh prefill.
+    let html = explorer_template();
+    for fabricated in [
+        "result[key] = \'\';",
+        "result[key] = 0;",
+        "result[key] = false;",
+        "result[key] = [];",
+        "result[key] = {};",
+    ] {
+        assert!(
+            !html.contains(fabricated),
+            "explorer.html fabricates a value again: {fabricated} (F6/FR-1)"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Authenticator — identity-carrying auth path
+//
+// `AuthHook` is validation-only and cannot propagate an identity; `Authenticator`
+// exists so that Rust callers get the same caller-facing API as the Python and
+// TypeScript bindings (see the trait docs). None of that was covered here — the
+// only coverage lived downstream in apcore-mcp-rust, which tests its own bridge
+// rather than this crate's behaviour.
+// ---------------------------------------------------------------------------
+
+struct AcceptingAuth {
+    identity: Identity,
+}
+
+#[async_trait::async_trait]
+impl Authenticator for AcceptingAuth {
+    async fn authenticate(&self, headers: &HashMap<String, String>) -> Option<Identity> {
+        match headers.get("authorization") {
+            Some(v) if v.contains("valid") => Some(self.identity.clone()),
+            _ => None,
+        }
+    }
+}
+
+struct RejectingAuth;
+
+#[async_trait::async_trait]
+impl Authenticator for RejectingAuth {
+    async fn authenticate(&self, _headers: &HashMap<String, String>) -> Option<Identity> {
+        None
+    }
+}
+
+fn test_identity() -> Identity {
+    Identity {
+        id: "user-1".to_string(),
+        identity_type: "human".to_string(),
+        roles: vec!["admin".to_string()],
+        attrs: HashMap::new(),
+    }
+}
+
+/// Handler that reports whatever `AUTH_IDENTITY` holds, so tests can observe
+/// propagation rather than merely the status code.
+fn identity_reporting_handler() -> ToolCallHandler {
+    ToolCallHandler::Basic(Arc::new(
+        |_name: String,
+         _args: serde_json::Value|
+         -> Pin<Box<dyn Future<Output = HandlerResult> + Send>> {
+            Box::pin(async move {
+                let seen = AUTH_IDENTITY.try_with(|id| id.clone()).ok().flatten();
+                let text = match seen {
+                    Some(id) => format!("{}|{}|{}", id.id, id.identity_type, id.roles.join(",")),
+                    None => "anonymous".to_string(),
+                };
+                Ok((
+                    vec![Content {
+                        content_type: "text".to_string(),
+                        text: Some(text),
+                        mime_type: None,
+                        data: None,
+                    }],
+                    false,
+                    None,
+                ))
+            })
+        },
+    ))
+}
+
+fn build_identity_router(config: UiConfig) -> axum::Router {
+    let tools: Arc<dyn ToolsProvider> = Arc::new(fake_tools());
+    mcp_embedded_ui::build_ui_routes(tools, identity_reporting_handler(), config)
+}
+
+#[tokio::test]
+async fn test_authenticator_accepts_and_propagates_identity() {
+    let config = UiConfig {
+        allow_execute: true,
+        authenticator: Some(Arc::new(AcceptingAuth {
+            identity: test_identity(),
+        })),
+        ..default_config()
+    };
+    let router = build_identity_router(config);
+    let (status, body) = send_post_with_headers(
+        &router,
+        "/tools/echo/call",
+        "{}",
+        vec![("authorization", "Bearer valid-token")],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        v["content"][0]["text"], "user-1|human|admin",
+        "handler must observe the authenticated identity, got: {body}"
+    );
+}
+
+#[tokio::test]
+async fn test_authenticator_rejection_returns_401() {
+    let config = UiConfig {
+        allow_execute: true,
+        authenticator: Some(Arc::new(RejectingAuth)),
+        ..default_config()
+    };
+    let router = build_identity_router(config);
+    let (status, body) = send_post(&router, "/tools/echo/call", "{}").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["error"], "Unauthorized");
+}
+
+#[tokio::test]
+async fn test_authenticator_takes_precedence_over_auth_hook() {
+    // The hook would reject; the authenticator accepts. Documented precedence
+    // is authenticator-wins, so the call must succeed and the hook must never
+    // run (proved by the flag, not just by the status code).
+    let hook_ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = Arc::clone(&hook_ran);
+    let config = UiConfig {
+        allow_execute: true,
+        authenticator: Some(Arc::new(AcceptingAuth {
+            identity: test_identity(),
+        })),
+        auth_hook: AuthHook(Some(Arc::new(move |_parts| {
+            let flag = Arc::clone(&flag);
+            Box::pin(async move {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                Err(AuthError)
+            })
+        }))),
+        ..default_config()
+    };
+    let router = build_identity_router(config);
+    let (status, _) = send_post_with_headers(
+        &router,
+        "/tools/echo/call",
+        "{}",
+        vec![("authorization", "Bearer valid-token")],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !hook_ran.load(std::sync::atomic::Ordering::SeqCst),
+        "auth_hook must not run when an authenticator is configured"
+    );
+}
+
+#[tokio::test]
+async fn test_auth_identity_is_none_without_authenticator() {
+    // AUTH_IDENTITY is always scoped, so `try_with` must succeed and yield
+    // None rather than panicking on an unset task-local.
+    let config = UiConfig {
+        allow_execute: true,
+        ..default_config()
+    };
+    let router = build_identity_router(config);
+    let (status, body) = send_post(&router, "/tools/echo/call", "{}").await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["content"][0]["text"], "anonymous");
+}
+
+#[tokio::test]
+async fn test_authenticator_does_not_guard_get_endpoints() {
+    // Same rule as auth_hook: discovery endpoints stay open (F4/FR-2).
+    let config = UiConfig {
+        allow_execute: true,
+        authenticator: Some(Arc::new(RejectingAuth)),
+        ..default_config()
+    };
+    let router = build_identity_router(config);
+    let (status, _) = send_get(&router, "/tools").await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send_get(&router, "/").await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_authenticator_does_not_guard_validate() {
+    // F7: /validate is never auth-gated.
+    let config = UiConfig {
+        allow_execute: false,
+        authenticator: Some(Arc::new(RejectingAuth)),
+        ..default_config()
+    };
+    let tools: Arc<dyn ToolsProvider> = Arc::new(validate_tools());
+    let router = mcp_embedded_ui::build_ui_routes(tools, identity_reporting_handler(), config);
+    let (status, body) = send_post(&router, "/tools/echo/validate", r#"{"city":"Paris"}"#).await;
+    assert_eq!(status, StatusCode::OK, "got: {body}");
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["valid"], serde_json::Value::Bool(true));
+}
+
+// ---------------------------------------------------------------------------
+// Validate response types (F7 public type exports)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_validate_types_are_nameable_from_crate_root() {
+    // F7: the /validate response shapes are protocol, not implementation
+    // detail. Constructing them here fails to compile if they stop being
+    // public.
+    let failure = mcp_embedded_ui::ValidationFailure {
+        path: "/city".to_string(),
+        message: "is required".to_string(),
+        keyword: Some("required".to_string()),
+    };
+    let result = mcp_embedded_ui::ValidateResult {
+        valid: false,
+        errors: vec![failure],
+    };
+    assert!(!result.valid);
+    assert_eq!(result.errors.len(), 1);
+    assert_eq!(result.errors[0].path, "/city");
 }

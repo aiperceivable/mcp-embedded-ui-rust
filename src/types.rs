@@ -119,6 +119,11 @@ pub enum ToolCallHandler {
 pub type AuthResult = Result<(), AuthError>;
 
 /// Async auth hook function. Takes owned request `Parts` for full request context.
+///
+/// Returns only a pass/fail verdict: it receives no continuation and hands
+/// back no value, so it **cannot** propagate an authenticated identity. Use
+/// [`Authenticator`] when the tool handler needs to know *who* the caller is —
+/// see that trait's docs for why both exist.
 pub type AuthHookFn = Arc<
     dyn Fn(axum::http::request::Parts) -> Pin<Box<dyn Future<Output = AuthResult> + Send>>
         + Send
@@ -126,6 +131,9 @@ pub type AuthHookFn = Arc<
 >;
 
 /// Optional auth hook.
+///
+/// Validation only — see [`AuthHookFn`]. For identity propagation use
+/// [`Authenticator`], which takes precedence when both are configured.
 #[derive(Clone, Default)]
 pub struct AuthHook(pub Option<AuthHookFn>);
 
@@ -136,7 +144,11 @@ pub struct UiConfig {
     pub title: String,
     pub project_name: Option<String>,
     pub project_url: Option<String>,
-    /// Legacy validation-only auth hook. Ignored when `authenticator` is set.
+    /// Validation-only auth hook. Ignored when `authenticator` is set.
+    ///
+    /// Marked legacy because it cannot propagate an identity (see
+    /// [`AuthHookFn`]), not because it is deprecated — it remains the right
+    /// choice for a pure pass/fail gate.
     pub auth_hook: AuthHook,
     /// Full authenticator that returns an [`Identity`] on success.
     ///
@@ -184,6 +196,40 @@ pub struct Identity {
 /// Implement this trait to plug apcore (or any other) authentication into the
 /// embedded UI. The [`Identity`] returned is made available to tool call
 /// handlers via the [`AUTH_IDENTITY`](crate::AUTH_IDENTITY) task-local.
+///
+/// # Why this exists alongside [`AuthHook`]
+///
+/// [`AuthHook`] is a *validation-only* gate. Its signature —
+/// `Fn(Parts) -> Future<Output = Result<(), AuthError>>` — yields a pass/fail
+/// verdict and nothing else, and it does **not** receive the continuation, so
+/// it can neither hand an identity back to the library nor scope one around
+/// the tool call. `server.rs` therefore records `identity = None` on that
+/// path; identity propagation through `AuthHook` alone is structurally
+/// impossible in Rust.
+///
+/// The sibling bindings do not have this problem, because their hook shapes
+/// carry the call: the Python `AuthHook` returns a context manager and the
+/// caller sets a `contextvars.ContextVar` across the `yield`; the TypeScript
+/// one is `(req, next) => Promise<Response>` and the caller wraps `next` in
+/// `AsyncLocalStorage.run`. Both propagate identity entirely in the caller,
+/// exactly as F4 prescribes, and neither needs anything from this library.
+///
+/// Rust has no equivalent that a bare `AuthHook` could drive. Without
+/// `Authenticator`, a Rust integration would have to expose a materially
+/// different API to its users than the Python and TypeScript ones do —
+/// "authenticate, then find your own way to reach the identity" instead of
+/// "pass an authenticator and read the identity in your handler".
+///
+/// `Authenticator` closes that gap: the library performs the authentication
+/// and scopes the resulting [`Identity`] into
+/// [`AUTH_IDENTITY`](crate::AUTH_IDENTITY) for the duration of the call. The point is **caller-facing API parity across all
+/// three language bindings**, not a richer feature set for Rust — the observed
+/// behaviour is the same in every language; only the layer that implements it
+/// differs, because the languages differ.
+///
+/// [`AuthHook`] is kept for callers that only need a pass/fail gate and have
+/// no use for an identity. When both are set on [`UiConfig`],
+/// `Authenticator` wins.
 #[async_trait]
 pub trait Authenticator: Send + Sync {
     /// Inspect `headers` and return an [`Identity`] on success, or `None` to
