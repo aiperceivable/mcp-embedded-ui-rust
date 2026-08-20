@@ -441,7 +441,8 @@ async fn test_validate_uncompilable_schema_is_a_failure() {
     // failure — never silently as valid, which would repeat the FR-1 defect
     // of a Validate button that cannot fail.
     let router = build_validate_router(default_config());
-    let (status, body) = send_post(&router, "/tools/badschema/validate", r#"{"anything": 1}"#).await;
+    let (status, body) =
+        send_post(&router, "/tools/badschema/validate", r#"{"anything": 1}"#).await;
     assert_eq!(status, StatusCode::OK);
     let v: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(
